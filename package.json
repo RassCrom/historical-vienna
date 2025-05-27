@@ -3,7 +3,7 @@
   "private": true,
   "version": "0.0.0",
   "type": "module",
-  "homepage": "hhttps://rasscrom.github.io/historical-vienna/",
+  "homepage": "https://rasscrom.github.io/historical-vienna/",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
