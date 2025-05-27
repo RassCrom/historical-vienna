@@ -20,7 +20,7 @@ const MapView = ({
 
         const map = new maplibregl.Map({
             container: mapContainer.current,
-            style: '/historical-vienna_center/style.json',
+            style: '/historical-vienna/style.json',
             center: [16.3638, 48.2082],
             zoom: 14,
             attributionControl: false,
