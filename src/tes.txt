@@ -1,0 +1,628 @@
+import { useEffect, useRef, useState } from 'react';
+import { X, Info, Clock, MapPin, Home, Calendar } from 'lucide-react';
+import maplibregl from 'maplibre-gl';
+import 'maplibre-gl/dist/maplibre-gl.css';
+import blanket from '../public/blanket.json'
+
+const viennaBounds = [
+  [16.18, 48.11], // Southwest coordinates (lng, lat)
+  [16.58, 48.32]  // Northeast coordinates (lng, lat)
+];
+
+function App() {
+  const mapContainer = useRef(null);
+  const mapRef = useRef(null);
+  const [selectedBuilding, setSelectedBuilding] = useState(null);
+  const [showInfoCard, setShowInfoCard] = useState(false);
+  const [mapStyle, setMapStyle] = useState('historical');
+
+  // Historical Vienna color palette
+  const colorPalettes = {
+    historical: {
+      name: 'Imperial Vienna',
+      description: 'Inspired by Habsburg era architecture',
+      colors: {
+        background: '#1a1611',
+        cardBg: 'rgba(245, 240, 235, 0.95)',
+        primary: '#8B4513', // Saddle Brown
+        secondary: '#DAA520', // Goldenrod
+        accent: '#CD853F', // Peru
+        text: '#2F1B14',
+        textLight: '#5D4E37',
+        border: '#D2B48C'
+      },
+      buildingColors: [
+        { year: 800, color: '#8B4513' },  // Medieval Brown
+        { year: 1200, color: '#A0522D' }, // Sienna
+        { year: 1500, color: '#CD853F' }, // Peru
+        { year: 1700, color: '#DAA520' }, // Goldenrod
+        { year: 1800, color: '#B8860B' }, // Dark Goldenrod
+        { year: 1900, color: '#D2691E' }, // Chocolate
+        { year: 2000, color: '#FF6347' }  // Tomato (modern)
+      ]
+    },
+    baroque: {
+      name: 'Baroque Elegance',
+      description: 'Rich colors of Austrian baroque',
+      colors: {
+        background: '#0f0f1a',
+        cardBg: 'rgba(255, 248, 240, 0.95)',
+        primary: '#800020', // Burgundy
+        secondary: '#FFD700', // Gold
+        accent: '#4B0082', // Indigo
+        text: '#1a1a1a',
+        textLight: '#4a4a4a',
+        border: '#DDD'
+      },
+      buildingColors: [
+        { year: 800, color: '#800020' },
+        { year: 1200, color: '#8B0000' },
+        { year: 1500, color: '#A52A2A' },
+        { year: 1700, color: '#DC143C' },
+        { year: 1800, color: '#FFD700' },
+        { year: 1900, color: '#FF8C00' },
+        { year: 2000, color: '#FF1493' }
+      ]
+    }
+  };
+
+  const currentPalette = colorPalettes[mapStyle];
+
+  useEffect(() => {
+    if (mapRef.current) return;
+
+    const map = new maplibregl.Map({
+      container: mapContainer.current,
+      style: '../public/style.json',
+      center: [16.3638, 48.2082],
+      zoom: 14,
+      attributionControl: false,
+      hash: true,
+      renderWorldCopies: false,
+      compact: false,
+      maxBounds: viennaBounds
+    });
+
+    map.on('load', () => {
+      map.addSource('blanket', {
+          type: 'geojson',
+          data: blanket
+      });
+
+      map.addLayer({
+        id: 'blanket-layer',
+        type: 'fill',
+        source: 'blanket',
+        paint: {
+            'fill-color': '#000',
+            "fill-opacity": .6,
+            "fill-outline-color": '#ccc',
+        }
+      })
+
+      map.addSource('vienna-buildings', {
+        type: 'vector',
+        tiles: [
+          'http://localhost:8080/geoserver/gwc/service/tms/1.0.0/vienna-age:buildings@EPSG:900913@pbf/{z}/{x}/{y}.pbf'
+        ],
+        scheme: 'tms', // GeoServer uses TMS (y is flipped compared to XYZ)
+        minzoom: 0,
+        maxzoom: 14
+      });
+
+      map.addLayer({
+        id: 'vienna-buildings-fill',
+        type: 'fill',
+        source: 'vienna-buildings',
+        'source-layer': 'buildings',
+        paint: {
+          'fill-color': [  
+            'case',
+            ['has', 'year_i'],
+            [
+              'interpolate',
+              ['linear'],
+              ['get', 'year_i'],
+              ...currentPalette.buildingColors.flatMap(({ year, color }) => [year, color])
+            ],
+            '#000'
+          ],
+          'fill-opacity': 1
+        }
+      })
+    })
+
+    map.addControl(new maplibregl.NavigationControl(), 'top-right');
+
+    map.on('mouseenter', 'vienna-buildings-fill', () => {
+        map.getCanvas().style.cursor = 'pointer';
+    })
+
+    map.on('mouseleave', 'vienna-buildings-fill', () => {
+        map.getCanvas().style.cursor = 'grab';
+    })
+
+    map.on('click', 'vienna-buildings-fill', (e) => {
+      const features = map.queryRenderedFeatures(e.point, {
+        layers: ['vienna-buildings-fill']
+      });
+      if (features.length) {
+        setSelectedBuilding(features[0].properties);
+      }
+    });
+
+    mapRef.current = map;
+
+    return () => {
+      if (mapRef.current) {
+        mapRef.current.remove();
+        mapRef.current = null;
+      }
+    };
+  }, [mapStyle]);
+
+  const handleLearnMore = () => {
+    setShowInfoCard(true);
+  };
+
+  const getBuildingAge = (year) => {
+    const currentYear = new Date().getFullYear();
+    return currentYear - year;
+  };
+
+  const getArchitecturalPeriod = (year) => {
+    if (year < 1000) return 'Early Medieval';
+    if (year < 1200) return 'Romanesque';
+    if (year < 1500) return 'Gothic';
+    if (year < 1600) return 'Renaissance';
+    if (year < 1750) return 'Baroque';
+    if (year < 1850) return 'Classical';
+    if (year < 1900) return 'Historicism';
+    if (year < 1950) return 'Modern';
+    return 'Contemporary';
+  };
+
+  return (
+    <div style={{ 
+      width: '100vw', 
+      height: '100vh', 
+      position: 'relative',
+      background: currentPalette.colors.background,
+      fontFamily: 'system-ui, -apple-system, sans-serif'
+    }}>
+      {/* Map Container */}
+      <div 
+        ref={mapContainer} 
+        style={{ width: '100%', height: '100%' }}
+      />
+
+      {/* Enhanced Legend */}
+      <div style={{
+        position: 'absolute',
+        top: '20px',
+        left: '20px',
+        background: currentPalette.colors.cardBg,
+        padding: '20px',
+        borderRadius: '12px',
+        fontSize: '14px',
+        maxWidth: '320px',
+        zIndex: 1000,
+        boxShadow: '0 8px 32px rgba(0,0,0,0.2)',
+        border: `1px solid ${currentPalette.colors.border}`
+      }}>
+        <div style={{ 
+          display: 'flex', 
+          alignItems: 'center', 
+          marginBottom: '12px' 
+        }}>
+          <Home size={20} style={{ 
+            color: currentPalette.colors.primary, 
+            marginRight: '8px' 
+          }} />
+          <h3 style={{ 
+            margin: 0, 
+            color: currentPalette.colors.text,
+            fontSize: '18px',
+            fontWeight: '600'
+          }}>
+            Historic Vienna Buildings
+          </h3>
+        </div>
+        
+        <p style={{ 
+          margin: '0 0 16px 0', 
+          fontSize: '13px',
+          color: currentPalette.colors.textLight,
+          lineHeight: '1.4'
+        }}>
+          Explore Vienna's architectural heritage through the centuries
+        </p>
+
+        {/* Color Palette Selector */}
+        <div style={{ marginBottom: '16px' }}>
+          <label style={{ 
+            fontSize: '12px', 
+            fontWeight: '500',
+            color: currentPalette.colors.text,
+            display: 'block',
+            marginBottom: '8px'
+          }}>
+            Color Theme
+          </label>
+          <select 
+            value={mapStyle}
+            onChange={(e) => setMapStyle(e.target.value)}
+            style={{
+              width: '100%',
+              padding: '6px 8px',
+              borderRadius: '6px',
+              border: `1px solid ${currentPalette.colors.border}`,
+              background: 'white',
+              fontSize: '12px',
+              color: 'rgb(93, 78, 55)',
+              fontWeight: 600
+            }}
+          >
+            {Object.entries(colorPalettes).map(([key, palette]) => (
+              <option key={key} value={key}>{palette.name}</option>
+            ))}
+          </select>
+        </div>
+
+        {/* Age Legend */}
+        <div style={{ marginBottom: '12px' }}>
+          <div style={{ 
+            fontSize: '12px', 
+            fontWeight: '500',
+            color: currentPalette.colors.text,
+            marginBottom: '8px',
+            display: 'flex',
+            alignItems: 'center'
+          }}>
+            <Clock size={14} style={{ marginRight: '4px' }} />
+            Building Age
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '3px' }}>
+            {currentPalette.buildingColors.map((item, index) => (
+              <div key={index} style={{ 
+                display: 'flex', 
+                alignItems: 'center', 
+                fontSize: '11px',
+                color: currentPalette.colors.textLight
+              }}>
+                <div style={{
+                  width: '16px',
+                  height: '12px',
+                  backgroundColor: item.color,
+                  marginRight: '8px',
+                  borderRadius: '2px',
+                  border: '1px solid rgba(0,0,0,0.1)'
+                }} />
+                {item.year}+ years
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div style={{ 
+          fontSize: '11px', 
+          color: currentPalette.colors.textLight,
+          borderTop: `1px solid ${currentPalette.colors.border}`,
+          paddingTop: '8px'
+        }}>
+          💡 Click buildings for details • Navigate with mouse/touch
+        </div>
+      </div>
+
+      {/* Simple Popup */}
+      {selectedBuilding && !showInfoCard && (
+        <div style={{
+          position: 'absolute',
+          bottom: '20px',
+          left: '20px',
+          background: currentPalette.colors.cardBg,
+          padding: '16px 20px',
+          borderRadius: '12px',
+          boxShadow: '0 8px 32px rgba(0,0,0,0.3)',
+          border: `1px solid ${currentPalette.colors.border}`,
+          zIndex: 2000,
+          minWidth: '280px',
+          maxWidth: '320px'
+        }}>
+          <div style={{ 
+            display: 'flex', 
+            justifyContent: 'space-between', 
+            alignItems: 'flex-start',
+            marginBottom: '12px'
+          }}>
+            <h4 style={{ 
+              margin: 0, 
+              color: currentPalette.colors.text,
+              fontSize: '16px',
+              fontWeight: '600'
+            }}>
+              {selectedBuilding.name || 'Historic Building'}
+            </h4>
+            <button
+              onClick={() => setSelectedBuilding(null)}
+              style={{
+                background: 'none',
+                border: 'none',
+                cursor: 'pointer',
+                color: currentPalette.colors.textLight,
+                padding: '2px'
+              }}
+            >
+              <X size={16} />
+            </button>
+          </div>
+          
+          <div style={{ 
+            display: 'flex', 
+            alignItems: 'center', 
+            marginBottom: '16px',
+            color: currentPalette.colors.textLight,
+            fontSize: '13px'
+          }}>
+            <Calendar size={14} style={{ marginRight: '6px' }} />
+            Built in {selectedBuilding.year_i} • {getArchitecturalPeriod(selectedBuilding.year_i)}
+          </div>
+
+          <button
+            onClick={handleLearnMore}
+            style={{
+              background: `linear-gradient(135deg, ${currentPalette.colors.primary}, ${currentPalette.colors.secondary})`,
+              color: 'white',
+              border: 'none',
+              padding: '10px 16px',
+              borderRadius: '8px',
+              cursor: 'pointer',
+              fontSize: '13px',
+              fontWeight: '500',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+              width: '100%',
+              justifyContent: 'center',
+              transition: 'transform 0.2s ease'
+            }}
+            onMouseOver={(e) => e.target.style.transform = 'translateY(-1px)'}
+            onMouseOut={(e) => e.target.style.transform = 'translateY(0)'}
+          >
+            <Info size={14} />
+            Learn More
+          </button>
+        </div>
+      )}
+
+      {/* Detailed Info Card */}
+      {showInfoCard && selectedBuilding && (
+        <div style={{
+          position: 'absolute',
+          top: '140px',
+          right: '8px',
+          background: currentPalette.colors.cardBg,
+          padding: '24px',
+          borderRadius: '16px',
+          boxShadow: '0 16px 64px rgba(0,0,0,0.4)',
+          border: `1px solid ${currentPalette.colors.border}`,
+          zIndex: 3000,
+          width: '90vw',
+          maxWidth: '380px',
+          maxHeight: '60vh',
+          overflow: 'auto'
+        }}>
+          <div style={{ 
+            display: 'flex', 
+            justifyContent: 'space-between', 
+            alignItems: 'flex-start',
+            marginBottom: '20px'
+          }}>
+            <div>
+              <h2 style={{ 
+                margin: '0 0 8px 0', 
+                color: currentPalette.colors.text,
+                fontSize: '22px',
+                fontWeight: '700'
+              }}>
+                {selectedBuilding.name || 'Historic Building'}
+              </h2>
+              <div style={{ 
+                display: 'flex', 
+                alignItems: 'center',
+                color: currentPalette.colors.textLight,
+                fontSize: '14px'
+              }}>
+                <MapPin size={14} style={{ marginRight: '6px' }} />
+                {selectedBuilding.address || selectedBuilding.district || 'Vienna, Austria'}
+              </div>
+            </div>
+            <button
+              onClick={() => {
+                setShowInfoCard(false);
+                setSelectedBuilding(null);
+              }}
+              style={{
+                background: 'none',
+                border: 'none',
+                cursor: 'pointer',
+                color: currentPalette.colors.textLight,
+                padding: '4px'
+              }}
+            >
+              <X size={20} />
+            </button>
+          </div>
+
+          {/* Key Stats */}
+          <div style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fit, minmax(100px, 1fr))',
+            gap: '12px',
+            marginBottom: '24px'
+          }}>
+            <div style={{
+              background: `linear-gradient(135deg, ${currentPalette.colors.primary}15, ${currentPalette.colors.secondary}15)`,
+              padding: '12px',
+              borderRadius: '8px',
+              textAlign: 'center',
+              border: `1px solid ${currentPalette.colors.border}`
+            }}>
+              <div style={{ 
+                fontSize: '20px', 
+                fontWeight: '700',
+                color: currentPalette.colors.primary
+              }}>
+                {selectedBuilding.year_i}
+              </div>
+              <div style={{ 
+                fontSize: '11px', 
+                color: currentPalette.colors.textLight,
+                fontWeight: '500'
+              }}>
+                Year Built
+              </div>
+            </div>
+            
+            <div style={{
+              background: `linear-gradient(135deg, ${currentPalette.colors.primary}15, ${currentPalette.colors.secondary}15)`,
+              padding: '12px',
+              borderRadius: '8px',
+              textAlign: 'center',
+              border: `1px solid ${currentPalette.colors.border}`
+            }}>
+              <div style={{ 
+                fontSize: '20px', 
+                fontWeight: '700',
+                color: currentPalette.colors.primary
+              }}>
+                {getBuildingAge(selectedBuilding.year_i)}
+              </div>
+              <div style={{ 
+                fontSize: '11px', 
+                color: currentPalette.colors.textLight,
+                fontWeight: '500'
+              }}>
+                Years Old
+              </div>
+            </div>
+
+            {selectedBuilding.height && (
+              <div style={{
+                background: `linear-gradient(135deg, ${currentPalette.colors.primary}15, ${currentPalette.colors.secondary}15)`,
+                padding: '12px',
+                borderRadius: '8px',
+                textAlign: 'center',
+                border: `1px solid ${currentPalette.colors.border}`
+              }}>
+                <div style={{ 
+                  fontSize: '20px', 
+                  fontWeight: '700',
+                  color: currentPalette.colors.primary
+                }}>
+                  {selectedBuilding.height}m
+                </div>
+                <div style={{ 
+                  fontSize: '11px', 
+                  color: currentPalette.colors.textLight,
+                  fontWeight: '500'
+                }}>
+                  Height
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Detailed Information */}
+          <div style={{ marginBottom: '20px' }}>
+            <h3 style={{ 
+              margin: '0 0 12px 0', 
+              color: currentPalette.colors.text,
+              fontSize: '16px',
+              fontWeight: '600'
+            }}>
+              Building Details
+            </h3>
+            
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+              {Object.entries(selectedBuilding).map(([key, value]) => {
+                if (value && !['name', 'year_i', 'height', 'address'].includes(key)) {
+                  const displayKey = key.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+                  return (
+                    <div key={key} style={{
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      paddingBottom: '6px',
+                      borderBottom: `1px solid ${currentPalette.colors.border}20`
+                    }}>
+                      <span style={{ 
+                        fontSize: '13px',
+                        color: currentPalette.colors.textLight,
+                        fontWeight: '500'
+                      }}>
+                        {displayKey}:
+                      </span>
+                      <span style={{ 
+                        fontSize: '13px',
+                        color: currentPalette.colors.text,
+                        fontWeight: '600',
+                        textAlign: 'right',
+                        maxWidth: '60%'
+                      }}>
+                        {value}
+                      </span>
+                    </div>
+                  );
+                }
+                return null;
+              })}
+            </div>
+          </div>
+
+          {/* Architectural Period Info */}
+          <div style={{
+            background: `linear-gradient(135deg, ${currentPalette.colors.secondary}20, ${currentPalette.colors.primary}20)`,
+            padding: '16px',
+            borderRadius: '12px',
+            border: `1px solid ${currentPalette.colors.border}`
+          }}>
+            <h4 style={{ 
+              margin: '0 0 8px 0', 
+              color: currentPalette.colors.text,
+              fontSize: '14px',
+              fontWeight: '600'
+            }}>
+              {getArchitecturalPeriod(selectedBuilding.year_i)} Period
+            </h4>
+            <p style={{ 
+              margin: 0, 
+              fontSize: '12px',
+              color: currentPalette.colors.textLight,
+              lineHeight: '1.4'
+            }}>
+              This building represents the architectural style and craftsmanship of its era, 
+              contributing to Vienna's rich historical tapestry in the heart of the Innere Stadt.
+            </p>
+          </div>
+        </div>
+      )}
+
+      {/* Style Credits */}
+      <div style={{
+        position: 'absolute',
+        bottom: '10px',
+        right: '10px',
+        fontSize: '10px',
+        color: currentPalette.colors.textLight,
+        background: currentPalette.colors.cardBg,
+        padding: '6px 10px',
+        borderRadius: '6px',
+        border: `1px solid ${currentPalette.colors.border}40`
+      }}>
+        {currentPalette.name} • {currentPalette.description}
+      </div>
+    </div>
+  );
+}
+
+export default App;
