@@ -235,7 +235,7 @@ function App() {
           <div style={{ 
             display: 'flex', 
             alignItems: 'center', 
-            marginBottom: '16px',
+            marginBottom: !isLegendCollapsed ? '16px' : '0',
             justifyContent: 'space-between'
           }}>
             <div style={{
